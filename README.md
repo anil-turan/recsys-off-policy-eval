@@ -1,5 +1,11 @@
 # Recommendation + Off-Policy Evaluation
 
+[![Python](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/)
+[![NumPy](https://img.shields.io/badge/NumPy-2.0-013243)](https://numpy.org/)
+[![SciPy](https://img.shields.io/badge/SciPy-1.13-8CAAE6)](https://scipy.org/)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.4-F7931E)](https://scikit-learn.org/)
+[![tests](https://img.shields.io/badge/tests-13%20passing-brightgreen)](tests/)
+
 Offline metrics tell you which recommender *ranks* best on yesterday's logs.
 They do **not** tell you what would happen if you actually deployed it — for
 that, teams run slow, risky A/B tests. This project builds an implicit-feedback
