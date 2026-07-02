@@ -1,0 +1,20 @@
+# Data (not committed — download instructions in README)
+data/raw/*
+!data/raw/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.ruff_cache/
+.mypy_cache/
+
+# Env
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
