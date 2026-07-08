@@ -4,7 +4,7 @@
 [![NumPy](https://img.shields.io/badge/NumPy-2.0-013243)](https://numpy.org/)
 [![SciPy](https://img.shields.io/badge/SciPy-1.13-8CAAE6)](https://scipy.org/)
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-1.4-F7931E)](https://scikit-learn.org/)
-[![tests](https://img.shields.io/badge/tests-13%20passing-brightgreen)](tests/)
+[![tests](https://img.shields.io/badge/tests-22%20passing-brightgreen)](tests/)
 
 Offline metrics tell you which recommender *ranks* best on yesterday's logs.
 They do **not** tell you what would happen if you actually deployed it — for
@@ -22,10 +22,13 @@ observational logs. This is a capability most portfolios never touch.
 **Recommender:** implicit ALS (Hu-Koren-Volinsky) from scratch — beats the
 popularity baseline on **every** ranking metric (NDCG@10 0.089 vs 0.078) and on
 **coverage** by 14× (34% vs 2%)
-**OPE:** IPS · SNIPS · Direct Method · Doubly Robust, from scratch, validated
-against known ground truth — DR gives the lowest RMSE and correctly selects the
-policy worth shipping
-**Stack:** Python 3.11 · NumPy · SciPy · scikit-learn (no black-box recsys/OPE library)
+**OPE:** IPS · SNIPS · Direct Method · Doubly Robust · Switch-DR, from scratch,
+validated against known ground truth — DR gives the lowest RMSE and correctly
+selects the policy worth shipping
+**Bandits:** LinUCB and linear Thompson Sampling, from scratch, learning a
+recommender policy online — LinUCB cuts average regret from 0.69 to 0.33 over
+20k rounds and ends with 45% less cumulative regret than random exploration
+**Stack:** Python 3.11 · NumPy · SciPy · scikit-learn (no black-box recsys/OPE/bandit library)
 
 ---
 
@@ -36,10 +39,16 @@ policy worth shipping
    **temporal** split.
 2. **Off-policy evaluation is the senior differentiator.** Deciding *which
    policy to deploy* from logged data — with the bias/variance trade-offs of
-   IPS vs DM vs Doubly Robust — is a genuinely advanced, rarely-seen skill.
-3. Everything is **implemented from scratch** (iALS, ranking metrics, all four
-   OPE estimators) and **unit-tested**, including a test that IPS is unbiased
-   and DR recovers ground truth on a controlled simulation.
+   IPS vs DM vs Doubly Robust vs Switch-DR — is a genuinely advanced,
+   rarely-seen skill.
+3. **Online learning closes the loop.** Contextual bandits (LinUCB, linear
+   Thompson Sampling) show the other half of the story: not just evaluating a
+   fixed policy from logs, but learning one directly, with regret quantifying
+   the real cost of exploration along the way.
+4. Everything is **implemented from scratch** (iALS, ranking metrics, all five
+   OPE estimators, both bandits) and **unit-tested**, including a test that IPS
+   is unbiased, DR recovers ground truth, and LinUCB/Thompson Sampling beat
+   random exploration on a controlled simulation.
 
 ---
 
@@ -53,13 +62,16 @@ recsys-off-policy-eval/
 │   │   ├── popularity.py          # non-personalised baseline
 │   │   └── ials.py                # implicit ALS matrix factorisation (from scratch)
 │   ├── evaluation/ranking.py      # Recall/Precision/MAP/NDCG@k + coverage
-│   └── ope/estimators.py          # IPS, SNIPS, DM, DR + bandit simulation harness
+│   └── ope/
+│       ├── estimators.py          # IPS, SNIPS, DM, DR, Switch-DR + logged-bandit simulation
+│       └── bandits.py             # LinUCB, linear Thompson Sampling + online regret harness
 ├── notebooks/
 │   ├── 01_eda.ipynb               # sparsity, long-tail, temporal-split validation
 │   ├── 02_recommenders.ipynb      # popularity vs iALS on ranking metrics
 │   ├── 03_off_policy_eval.ipynb   # IPS/SNIPS/DM/DR vs ground truth (bias/variance)
-│   └── 04_policy_comparison.ipynb # use OPE to choose which recommender to ship
-├── tests/                         # 13 tests: ranking correctness, OPE unbiasedness, iALS
+│   ├── 04_policy_comparison.ipynb # use OPE to choose which recommender to ship
+│   └── 05_contextual_bandits.ipynb # LinUCB/Thompson regret curves + Switch-DR tau sweep
+├── tests/                         # 22 tests: ranking correctness, OPE unbiasedness, iALS, bandits
 ├── data/raw/                      # MovieLens-1M (not committed)
 ├── reports/figures/
 └── pyproject.toml
@@ -123,6 +135,35 @@ That is the business payoff: turn existing logs into a deployment decision
 instead of spending weeks of live traffic (and exposing users to worse
 candidates) to learn the same thing.
 
+### 4. Contextual bandits learn a policy online — and Switch-DR evaluates it
+
+OPE above evaluates a *fixed* candidate policy from logs. Notebook 05 asks the
+complementary question: what if the recommender learns online instead, and how
+much does exploration cost along the way?
+
+LinUCB and linear Thompson Sampling each learn a per-item ridge-regression
+reward model from scratch, one user interaction at a time, over 20,000 rounds
+against the same 200 candidate items:
+
+| Policy | Avg. regret (first 20%) | Avg. regret (last 20%) | Cumulative regret |
+|--------|--------------------------|--------------------------|--------------------|
+| Random | 0.816 | 0.819 | 16,349 |
+| Thompson Sampling | 0.768 | 0.447 | 11,536 |
+| **LinUCB** | 0.693 | **0.334** | **9,061** |
+
+![Bandit regret](reports/figures/05_bandit_regret.png)
+
+Both bandits pull ahead of random within the first few thousand rounds and the
+gap widens as they learn — LinUCB ends **45% lower** cumulative regret than
+random exploration.
+
+Converting LinUCB's learned policy back into something OPE can score and
+sweeping Switch-DR's importance-weight cap `tau` shows the estimator is a real
+bias/variance dial, not a strictly-better version of DR: error is **lowest at
+tau=2** (0.0004), not at tau=∞ (0.0028, = plain DR) or tau=0 (0.0113, = DM).
+
+![Switch-DR tau sweep](reports/figures/05_switch_dr_tau.png)
+
 ---
 
 ## Quickstart
@@ -135,7 +176,7 @@ pip install -e ".[dev]"
 curl -L -o /tmp/ml-1m.zip https://files.grouplens.org/datasets/movielens/ml-1m.zip
 unzip -o /tmp/ml-1m.zip -d /tmp && cp /tmp/ml-1m/ratings.dat data/raw/ratings.dat
 
-# 3. run the notebooks in order (01 → 04)
+# 3. run the notebooks in order (01 → 05)
 
 # 4. run the tests
 python -m pytest tests/ -v
@@ -156,6 +197,13 @@ python -m pytest tests/ -v
 - **Honest simulation:** the reward model behind DM/DR is a logistic regression
   fit on logged data only — DR is *not* handed the oracle, so the reported
   small DM bias is real, not an artefact.
+- **Bandit context is deliberately low-dimensional:** the online bandits use an
+  8-factor iALS embedding (not the 64-factor one behind the offline
+  recommender) — a real sample-efficiency trade-off given only 20k rounds
+  spread across 200 arms.
+- **Sherman-Morrison updates:** both `LinUCB` and `LinearThompsonSampling`
+  maintain each arm's `A_a^{-1}` via a rank-1 update instead of re-inverting a
+  (d×d) matrix every round.
 
 ---
 
