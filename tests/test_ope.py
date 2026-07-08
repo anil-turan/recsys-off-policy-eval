@@ -14,6 +14,7 @@ from src.ope.estimators import (
     simulate_bandit_logs,
     snips,
     softmax_policy,
+    switch_dr,
     true_policy_value,
 )
 
@@ -79,6 +80,80 @@ def test_doubly_robust_recovers_truth_with_perfect_reward_model():
     dm = direct_method(v_target)
     assert abs(dr - truth) < 0.02
     assert abs(dm - truth) < 0.02
+
+
+def test_switch_dr_equals_direct_method_at_tau_zero():
+    """No importance weight is ever <= 0, so tau=0 switches the IPS
+    correction off everywhere and Switch-DR collapses to the DM term."""
+    scores, reward_true = _toy_world()
+    pi0 = softmax_policy(scores, temperature=1.0, epsilon=0.3)
+    pi1 = softmax_policy(scores, temperature=0.4, epsilon=0.1)
+
+    log = simulate_bandit_logs(pi0, reward_true, seed=1)
+    u, a, r, ps = log["context"], log["action"], log["reward"], log["pscore"]
+    q_all = reward_true[u]
+    q_logged = q_all[np.arange(len(u)), a]
+    v_target = np.sum(pi1[u] * q_all, axis=1)
+
+    sw = switch_dr(r, ps, pi1[u, a], q_logged, v_target, tau=0.0)
+    dm = direct_method(v_target)
+    assert sw == dm
+
+
+def test_switch_dr_equals_doubly_robust_at_tau_infinity():
+    """A threshold no weight can exceed means every sample keeps its IPS
+    correction, so Switch-DR collapses to plain DR."""
+    scores, reward_true = _toy_world()
+    pi0 = softmax_policy(scores, temperature=1.0, epsilon=0.3)
+    pi1 = softmax_policy(scores, temperature=0.4, epsilon=0.1)
+
+    log = simulate_bandit_logs(pi0, reward_true, seed=1)
+    u, a, r, ps = log["context"], log["action"], log["reward"], log["pscore"]
+    q_all = reward_true[u]
+    q_logged = q_all[np.arange(len(u)), a]
+    v_target = np.sum(pi1[u] * q_all, axis=1)
+
+    sw = switch_dr(r, ps, pi1[u, a], q_logged, v_target, tau=np.inf)
+    dr = doubly_robust(r, ps, pi1[u, a], q_logged, v_target)
+    assert abs(sw - dr) < 1e-10
+
+
+def test_switch_dr_recovers_truth_with_perfect_reward_model():
+    scores, reward_true = _toy_world()
+    pi0 = softmax_policy(scores, temperature=1.0, epsilon=0.3)
+    pi1 = softmax_policy(scores, temperature=0.4, epsilon=0.1)
+    truth = true_policy_value(pi1, reward_true)
+
+    log = simulate_bandit_logs(pi0, reward_true, seed=1)
+    u, a, r, ps = log["context"], log["action"], log["reward"], log["pscore"]
+    q_all = reward_true[u]
+    q_logged = q_all[np.arange(len(u)), a]
+    v_target = np.sum(pi1[u] * q_all, axis=1)
+
+    sw = switch_dr(r, ps, pi1[u, a], q_logged, v_target, tau=2.0)
+    assert abs(sw - truth) < 0.05
+
+
+def test_switch_dr_variance_between_dm_and_dr_at_moderate_tau():
+    """A moderate tau should sit between the DM (zero variance from
+    weighting) and DR (full IPS correction) variance across repeated logs."""
+    scores, reward_true = _toy_world()
+    pi0 = softmax_policy(scores, temperature=1.0, epsilon=0.05)   # sparse logging
+    pi1 = softmax_policy(scores, temperature=0.2, epsilon=0.01)   # sharp target -> heavy tails
+
+    dm_est, dr_est, switch_est = [], [], []
+    for seed in range(100):
+        log = simulate_bandit_logs(pi0, reward_true, seed=seed)
+        u, a, r, ps = log["context"], log["action"], log["reward"], log["pscore"]
+        q_all = reward_true[u]
+        q_logged = q_all[np.arange(len(u)), a]
+        v_target = np.sum(pi1[u] * q_all, axis=1)
+        tps = pi1[u, a]
+        dm_est.append(direct_method(v_target))
+        dr_est.append(doubly_robust(r, ps, tps, q_logged, v_target))
+        switch_est.append(switch_dr(r, ps, tps, q_logged, v_target, tau=5.0))
+
+    assert np.std(dm_est) <= np.std(switch_est) <= np.std(dr_est)
 
 
 def test_ess_drops_when_policies_diverge():

@@ -16,6 +16,12 @@ Estimators implemented from scratch (all take numpy arrays):
            the target policy; low variance but biased if the model is wrong.
     DR   — Doubly Robust: DM baseline + IPS correction on the residual;
            unbiased if *either* the propensities or the reward model are right.
+    SwitchDR — DR, but the IPS correction is switched off for samples whose
+           importance weight exceeds a threshold `tau`. Those are exactly the
+           samples DR's variance blows up on, so clipping them trades a little
+           bias (falling back to the DM term alone) for a lot less variance.
+           Wang, Agarwal & Dudik (2017), "Optimal and Adaptive Off-policy
+           Evaluation in Contextual Bandits".
 
 Convention per logged sample i:
     reward[i]        : observed reward of the logged action
@@ -89,6 +95,19 @@ def doubly_robust(reward: np.ndarray, pscore: np.ndarray, target_pscore: np.ndar
                   q_hat_logged: np.ndarray, v_hat_target: np.ndarray) -> float:
     weights = target_pscore / pscore
     return float(np.mean(v_hat_target + weights * (reward - q_hat_logged)))
+
+
+def switch_dr(reward: np.ndarray, pscore: np.ndarray, target_pscore: np.ndarray,
+             q_hat_logged: np.ndarray, v_hat_target: np.ndarray, tau: float) -> float:
+    """Switch-DR: apply the IPS correction only where the importance weight
+    target_pscore/pscore is <= tau; above that, fall back to the DM term
+    alone. tau=0 recovers direct_method exactly; tau=inf recovers
+    doubly_robust exactly — tau interpolates the bias/variance trade-off
+    between the two."""
+    weights = target_pscore / pscore
+    use_ips = weights <= tau
+    correction = np.where(use_ips, weights * (reward - q_hat_logged), 0.0)
+    return float(np.mean(v_hat_target + correction))
 
 
 def effective_sample_size(pscore: np.ndarray, target_pscore: np.ndarray) -> float:
